@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM RAG 演示应用</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            padding-top: 2rem;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            border-radius: 0.5rem;
+        }
+        .source-card {
+            background-color: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+            border-radius: 0.25rem;
+        }
+        #loading {
+            display: none;
+        }
+        .tab-content {
+            padding: 1.5rem;
+            background-color: white;
+            border: 1px solid #dee2e6;
+            border-top: none;
+            border-radius: 0 0 0.25rem 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">LLM RAG 演示应用</h1>
+        
+        <ul class="nav nav-tabs" id="myTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="query-tab" data-bs-toggle="tab" data-bs-target="#query" type="button" role="tab" aria-controls="query" aria-selected="true">问答</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="document-tab" data-bs-toggle="tab" data-bs-target="#document" type="button" role="tab" aria-controls="document" aria-selected="false">文档上传</button>
+            </li>
+        </ul>
+        
+        <div class="tab-content" id="myTabContent">
+            <!-- 问答面板 -->
+            <div class="tab-pane fade show active" id="query" role="tabpanel" aria-labelledby="query-tab">
+                <form id="query-form">
+                    <div class="mb-3">
+                        <label for="query-input" class="form-label">提问：</label>
+                        <input type="text" class="form-control" id="query-input" placeholder="请输入您的问题...">
+                    </div>
+                    <div class="mb-3">
+                        <label for="top-k" class="form-label">检索文档数量：</label>
+                        <select class="form-select" id="top-k">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3" selected>3</option>
+                            <option value="5">5</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">提交问题</button>
+                </form>
+                
+                <div id="loading" class="text-center my-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <p class="mt-2">正在思考中...</p>
+                </div>
+                
+                <div id="answer-container" class="mt-4" style="display: none;">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">回答</h5>
+                        </div>
+                        <div class="card-body">
+                            <p id="answer-text"></p>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <h5>参考来源：</h5>
+                        <div id="sources-container"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 文档上传面板 -->
+            <div class="tab-pane fade" id="document" role="tabpanel" aria-labelledby="document-tab">
+                <form id="document-form">
+                    <div class="mb-3">
+                        <label for="document-content" class="form-label">文档内容：</label>
+                        <textarea class="form-control" id="document-content" rows="10" placeholder="请输入文档内容..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="document-title" class="form-label">文档标题（选填）：</label>
+                        <input type="text" class="form-control" id="document-title" placeholder="请输入文档标题...">
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">上传文档</button>
+                </form>
+                
+                <div id="document-result" class="alert alert-success mt-3" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 问题提交
+        document.getElementById('query-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const query = document.getElementById('query-input').value.trim();
+            const topK = parseInt(document.getElementById('top-k').value);
+            
+            if (!query) {
+                alert('请输入您的问题');
+                return;
+            }
+            
+            // 显示加载状态
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('answer-container').style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        top_k: topK
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error('查询失败');
+                }
+                
+                const data = await response.json();
+                
+                // 显示回答
+                document.getElementById('answer-text').textContent = data.answer;
+                
+                // 显示来源
+                const sourcesContainer = document.getElementById('sources-container');
+                sourcesContainer.innerHTML = '';
+                
+                if (data.sources && data.sources.length > 0) {
+                    data.sources.forEach((source, index) => {
+                        const sourceDiv = document.createElement('div');
+                        sourceDiv.className = 'source-card';
+                        
+                        const titleSpan = document.createElement('span');
+                        titleSpan.className = 'fw-bold';
+                        titleSpan.textContent = `来源 ${index + 1}`;
+                        if (source.metadata && source.metadata.title) {
+                            titleSpan.textContent += ` - ${source.metadata.title}`;
+                        }
+                        
+                        const contentP = document.createElement('p');
+                        contentP.className = 'mb-0 mt-2';
+                        contentP.textContent = source.content;
+                        
+                        sourceDiv.appendChild(titleSpan);
+                        sourceDiv.appendChild(contentP);
+                        
+                        if (source.score !== null) {
+                            const scoreSpan = document.createElement('small');
+                            scoreSpan.className = 'text-muted';
+                            scoreSpan.textContent = `相关度: ${(1 - source.score).toFixed(3)}`;
+                            sourceDiv.appendChild(document.createElement('br'));
+                            sourceDiv.appendChild(scoreSpan);
+                        }
+                        
+                        sourcesContainer.appendChild(sourceDiv);
+                    });
+                } else {
+                    sourcesContainer.innerHTML = '<p class="text-muted">没有找到相关来源</p>';
+                }
+                
+                // 显示回答容器
+                document.getElementById('answer-container').style.display = 'block';
+            } catch (error) {
+                console.error('Error:', error);
+                alert('查询处理失败，请稍后再试');
+            } finally {
+                // 隐藏加载状态
+                document.getElementById('loading').style.display = 'none';
+            }
+        });
+        
+        // 文档提交
+        document.getElementById('document-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const content = document.getElementById('document-content').value.trim();
+            const title = document.getElementById('document-title').value.trim();
+            
+            if (!content) {
+                alert('请输入文档内容');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/documents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        content: content,
+                        metadata: {
+                            title: title || '未命名文档'
+                        }
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error('上传失败');
+                }
+                
+                const data = await response.json();
+                
+                // 显示结果
+                const resultDiv = document.getElementById('document-result');
+                resultDiv.textContent = data.message;
+                resultDiv.style.display = 'block';
+                
+                // 清空表单
+                document.getElementById('document-content').value = '';
+                document.getElementById('document-title').value = '';
+                
+                // 3秒后隐藏结果
+                setTimeout(() => {
+                    resultDiv.style.display = 'none';
+                }, 3000);
+            } catch (error) {
+                console.error('Error:', error);
+                alert('文档上传失败，请稍后再试');
+            }
+        });
+    </script>
+</body>
+</html> 
